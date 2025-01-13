@@ -1,0 +1,7 @@
+{
+    "voice_1":{
+        "name":"voice_1",
+        "path":"asset/zero_shot_prompt.wav",
+        "text": "希望你以后能够做的比我还好呦。"
+    }
+}

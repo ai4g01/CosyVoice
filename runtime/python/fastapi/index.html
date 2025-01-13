@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>文本到语音示例</title>
+    <style>
+        button, input, select {
+        padding: 8px 8px;
+        margin: 0px 12px 12px 0px;
+    }
+    button {
+        padding: 8px 16px;
+    }
+    input[type="text"] {
+        width: 300px;
+    }
+    </style>
+</head>
+<body>
+    <h1>文本到语音示例</h1>
+    <label for="voiceSelect">选择模式：</label>
+    <select id="voiceSelect">
+        <option value="sft" selected>sft</option>
+        <option value="zero_shot" >zero_shot</option>
+        <option value="cross_lingual" >cross_lingual</option>
+        <option value="instruct2" >instruct2</option>
+    </select>
+    <label for="spk_ids">选择说话人：</label>
+    <select id="spk_ids"></select>
+    <br />
+    <label for="instruct">输入指令：</label><input type="text" id="instruct" ></input>
+    <br />
+    <label for="textInput" style="vertical-align: top">输入文本：</label>
+    <textarea id="textInput" rows="4" cols="100">我是通义实验室语音团队全新推出的生成式语音大模型，提供舒适自然的语音合成能力。</textarea><br>
+    <button id="sendButton">发送文本</button>
+
+    <script>
+        // 创建 WebSocket 连接
+        const socket = new WebSocket(window.location.href.replace('http', 'ws'));
+        socket.binaryType = 'arraybuffer';
+        const audioQueue = []
+        let running = false;
+
+        // 创建 AudioContext
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+        // 处理 WebSocket 连接打开事件
+        socket.onopen = () => {
+            console.log('WebSocket 连接已建立');
+        };
+
+        // 处理接收到的消息
+        socket.onmessage = async (event) => {
+            if (typeof event.data === 'string'){
+                console.log('收到文本消息:', event.data);
+                return
+            }
+            try {
+                // 假设服务器发送的是 ArrayBuffer 格式的音频数据
+                const audioData = event.data;
+                if (audioContext.state === 'suspended') {
+                    audioContext.resume();
+                }
+
+                // 播放音频
+                pcmData =  new Int16Array(audioData);
+                fp32 = new Float32Array(pcmData.length);
+                for (let i = 0; i < pcmData.length; i++) {
+                    fp32[i] =  pcmData[i] / 32768.0;
+                }
+                const buffer = audioContext.createBuffer(1, pcmData.length , 24000);
+                buffer.getChannelData(0).set(fp32)
+
+                audioQueue.push(buffer)
+                if (!running)
+                    playAudio()
+
+                } catch (error) {
+                    console.error('音频数据处理错误:', error);
+                }
+        };
+
+        // 播放解码后的音频
+        function playAudio() {
+            running = audioQueue.length > 0;
+            if (audioQueue.length > 0) {
+                const source = audioContext.createBufferSource();
+                source.buffer = audioQueue.shift();
+                source.connect(audioContext.destination);
+                source.onended = playAudio;
+                source.start(0);        
+            }
+        }
+
+        // 处理 WebSocket 连接关闭事件
+        socket.onclose = () => {
+            console.log('WebSocket 连接已关闭');
+        };
+
+        // 处理 WebSocket 错误事件
+        socket.onerror = (error) => {
+            console.error('WebSocket 发生错误:', error);
+        };
+
+        // 发送文本数据到服务器
+        document.getElementById('sendButton').addEventListener('click', () => {
+            const text = document.getElementById('textInput').value;
+            if (text && socket.readyState === WebSocket.OPEN) {
+                start_data = {
+                    "action" : "start",
+                    "method" : voiceSelect.value,
+                    "text" : text,
+                    "spk_id" : spk_ids.value,
+                    "instruct": instruct.value
+
+                }
+                socket.send(JSON.stringify(start_data));
+                // for (let char of text){
+                //     data = {
+                //         "action" : "put_text",
+                //         "text" : char
+                //     }
+                //     socket.send(JSON.stringify(data));
+                // }
+                data = {
+                        "action" : "put_text",
+                        "text" : text
+                    }
+                socket.send(JSON.stringify(data));
+                finish_data = {
+                    "action" : "finish",
+                }
+                socket.send(JSON.stringify(finish_data));
+                console.log('已发送文本:', text);
+            } else {
+                console.error('WebSocket 未连接或文本为空');
+            }
+        });
+
+
+        function update_spk_ids(method) {
+            label = document.querySelector('label[for="instruct"]')
+            if (method == 'instruct2')
+                label.style.display = instruct.style.display = 'inline-block';
+            else
+            label.style.display = instruct.style.display = 'none';
+            fetch('/prompt_voice/' + method)
+                .then(response => response.json())
+                .then(data => {
+                    spk_ids.innerHTML = '';
+                    data.forEach(item => {
+                        const option = document.createElement('option');
+                        option.value = item;
+                        option.textContent = item; // 假设数据中有name属性表示说话人名称
+                        spk_ids.appendChild(option);
+                    });
+                })
+        }
+        voiceSelect.addEventListener('change', function () {
+            update_spk_ids(this.value);
+        });
+        update_spk_ids('sft');
+    </script>
+</body>
+</html>

@@ -354,7 +354,7 @@ class CosyVoice2Model(CosyVoiceModel):
         if stream is True:
             token_offset = 0
             while True:
-                time.sleep(0.1)
+                time.sleep(0.01)
                 if len(self.tts_speech_token_dict[this_uuid]) - token_offset >= self.token_hop_len + self.flow.pre_lookahead_len:
                     this_tts_speech_token = torch.tensor(self.tts_speech_token_dict[this_uuid][:token_offset + self.token_hop_len + self.flow.pre_lookahead_len]).unsqueeze(dim=0)
                     this_tts_speech = self.token2wav(token=this_tts_speech_token,
