@@ -14,23 +14,25 @@
 import asyncio
 import json
 import os
+import re
 import sys
 import argparse
 import logging
 import threading
-import uuid
+import time
 logging.getLogger('matplotlib').setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
-from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import numpy as np
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append('{}/../../..'.format(ROOT_DIR))
 sys.path.append('{}/../../../third_party/Matcha-TTS'.format(ROOT_DIR))
-from cosyvoice.cli.rt_cosyvoice import RTCosyVoice2
+# from cosyvoice.cli.rt_cosyvoice import RTCosyVoice2
+from cosyvoice.cli.cosyvoice import CosyVoice2
 from cosyvoice.utils.file_utils import load_wav
+from cosyvoice.utils.common import set_all_random_seed
 
 app = FastAPI()
 
@@ -44,7 +46,7 @@ async def get_prompt_voice(type):
     if type == "sft":
         return cosyvoice.list_available_spks()
     else:
-        return await promptVoide.get_list()
+        return await promptVoice.get_list()
 
 
 @app.websocket("/")
@@ -85,51 +87,90 @@ class PromptVoice:
             return self.prompt_voice[spk_id]["text"], load_wav(self.prompt_voice[spk_id]["path"], 16000)
         raise Exception(f"{spk_id} not found")
 
-promptVoide = PromptVoice()
+promptVoice = PromptVoice()
 
 class SpeechSynthesizer:
     def __init__(self, websocket: WebSocket):
         self.websocket = websocket
         self._uuid = None
+        self._input_text = ""
+        self._intput_text_lock = threading.Lock()
+        self._finished = False
+
 
     async def start(self, data: dict):
-        self._uuid = cosyvoice.streaming_start(uuid=str(uuid.uuid1()))
-        self._thread = threading.Thread(target=self._synthesis, args=(data,))
+        self._thread = threading.Thread(target=self._run, args=(data,))
         self._thread.start()
-    
+
     async def close(self):
-        await self.finish()
-        cosyvoice.streaming_close(self._uuid) if self._uuid else None
-        
+        pass
+
     async def finish(self):        
-        cosyvoice.streaming_finish(self._uuid) if self._uuid else None
+        self._finished = True
 
     async def put_text(self, data: dict):
-        cosyvoice.put_text(uuid=self._uuid, text=data["text"])
+        with self._intput_text_lock:
+            self._input_text += data["text"]
 
-    def _synthesis(self, data: dict):
+    def _run(self, data: dict):
         logger.info(f"{self._uuid} started, {data}")
         asyncio.run(self.websocket.send_json({"event": "started", "uuid": self._uuid})) #  
-        set_all_random_seed(42)
-        if data["method"] == "sft":
-            model_output = cosyvoice.inference_sft( spk_id=data["spk_id"], uuid=self._uuid)
-        elif data["method"] == "zero_shot":
-            prompt_text, prompt_speech_16k = promptVoide.get(data["spk_id"])
-            model_output = cosyvoice.inference_zero_shot(prompt_text, prompt_speech_16k, uuid=self._uuid)               
-        elif data["method"] == "cross_lingual":
-            _, prompt_speech_16k = promptVoide.get(data["spk_id"])
-            model_output = cosyvoice.inference_cross_lingual(prompt_speech_16k, uuid=self._uuid)                
-        elif data["method"] == "instruct2":
-            _, prompt_speech_16k = promptVoide.get(data["spk_id"])
-            model_output = cosyvoice.inference_instruct2(data["instruct"], prompt_speech_16k, uuid=self._uuid)
 
-        for i in model_output:
-            tts_audio = (i["tts_speech"].numpy() * (2**15)).astype(np.int16).tobytes()
-            asyncio.run(self.websocket.send_bytes(tts_audio))
+        remaining_text = ""
+        sequence_min_len = 6
+        while not self._finished:
+            with self._intput_text_lock:
+                text = remaining_text + self._input_text
+                self._input_text = ""
+
+            end_index = self.find_last_punctuations(text)  ##找到最后一个标点符号
+            if end_index > sequence_min_len:
+                tts_text = text[:end_index]
+                remaining_text = text[end_index:]
+                data['text'] = tts_text
+                self._synthesis(data)
+            else:
+                remaining_text = text
+
+            time.sleep(0.01)
+
+        with self._intput_text_lock:
+            text = remaining_text + self._input_text
+            self._input_text = ""
+        data['text'] = text
+        self._synthesis(data)
 
         asyncio.run(self.websocket.send_json({"event": "finished", "uuid": self._uuid}))
         self._thread = None
         logger.info(f"{self._uuid} finished")
+
+
+    def find_last_punctuations(self, s):
+        punctuation = r'.,?!"【】。，；：？！～…'                      
+        match = re.search(f"[{punctuation}]", s[::-1])
+        if match:
+            return len(s) - match.start() - 1
+        else:
+            return len(s) - 1
+
+    def _synthesis(self, data: dict):
+
+        set_all_random_seed(42)
+        if data["method"] == "sft":
+            model_output = cosyvoice.inference_sft(tts_text=data['text'], spk_id=data["spk_id"], stream=True)
+        elif data["method"] == "zero_shot":
+            prompt_text, prompt_speech_16k = promptVoice.get(data["spk_id"])
+            model_output = cosyvoice.inference_zero_shot(data['text'], prompt_text, prompt_speech_16k, stream=True)               
+        elif data["method"] == "cross_lingual":
+            _, prompt_speech_16k = promptVoice.get(data["spk_id"])
+            model_output = cosyvoice.inference_cross_lingual(data['text'], prompt_speech_16k, stream=True)                
+        elif data["method"] == "instruct2":
+            _, prompt_speech_16k = promptVoice.get(data["spk_id"])
+            model_output = cosyvoice.inference_instruct2(data['text'], data["instruct"], prompt_speech_16k, stream=True)
+
+        for i in model_output:
+            tts_audio = (i["tts_speech"].numpy() * (2**15)).astype(np.int16).tobytes()
+            asyncio.run(self.websocket.send_bytes(tts_audio))
 
 
 if __name__ == '__main__':
@@ -142,6 +183,5 @@ if __name__ == '__main__':
                         default='pretrained_models/CosyVoice2-0.5B',
                         help='local path or modelscope repo id')
     args = parser.parse_args()
-    cosyvoice = RTCosyVoice2(args.model_dir, load_jit=False, load_trt=False)
-    from cosyvoice.utils.common import set_all_random_seed
+    cosyvoice = CosyVoice2(args.model_dir, load_jit=False, load_trt=False)
     uvicorn.run(app, host="0.0.0.0", port=args.port)

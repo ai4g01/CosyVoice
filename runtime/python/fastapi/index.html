@@ -115,18 +115,18 @@
 
                 }
                 socket.send(JSON.stringify(start_data));
-                // for (let char of text){
-                //     data = {
-                //         "action" : "put_text",
-                //         "text" : char
-                //     }
-                //     socket.send(JSON.stringify(data));
-                // }
-                data = {
+                for (let char of text){
+                    data = {
                         "action" : "put_text",
-                        "text" : text
+                        "text" : char
                     }
-                socket.send(JSON.stringify(data));
+                    socket.send(JSON.stringify(data));
+                }
+                // data = {
+                //         "action" : "put_text",
+                //         "text" : text
+                //     }
+                // socket.send(JSON.stringify(data));
                 finish_data = {
                     "action" : "finish",
                 }
