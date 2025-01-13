@@ -20,6 +20,7 @@ import argparse
 import logging
 import threading
 import time
+import uuid
 logging.getLogger('matplotlib').setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -92,13 +93,14 @@ promptVoice = PromptVoice()
 class SpeechSynthesizer:
     def __init__(self, websocket: WebSocket):
         self.websocket = websocket
-        self._uuid = None
+        self._uuid = str(uuid.uuid1())
         self._input_text = ""
         self._intput_text_lock = threading.Lock()
         self._finished = False
 
 
     async def start(self, data: dict):
+        self._finished = False
         self._thread = threading.Thread(target=self._run, args=(data,))
         self._thread.start()
 
@@ -154,7 +156,7 @@ class SpeechSynthesizer:
             return len(s) - 1
 
     def _synthesis(self, data: dict):
-
+        #logger.info(f"{self._uuid} synthesis, {data}")
         set_all_random_seed(42)
         if data["method"] == "sft":
             model_output = cosyvoice.inference_sft(tts_text=data['text'], spk_id=data["spk_id"], stream=True)

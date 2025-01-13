@@ -1,7 +1,22 @@
 {
-    "voice_1":{
+    "女声1":{
         "name":"voice_1",
         "path":"asset/zero_shot_prompt.wav",
         "text": "希望你以后能够做的比我还好呦。"
+    },
+    "男声1":{
+        "name":"男生1",
+        "path":"asset/nansheng1.wav",
+        "text": "对，这就是我，万人敬仰的太乙真人，虽然有点婴儿肥，但也掩不住我逼人的帅气。"
+    },
+    "女声2":{
+        "name":"女声2",
+        "path":"asset/nvsheng2.wav",
+        "text": "今夜的月光如此清亮，不做些什么真是浪费。随我一同去月下漫步吧，不许拒绝。"
+    },
+    "男声2":{
+        "name":"男生2",
+        "path":"asset/nansheng2.wav",
+        "text": "晴空万里不如你心情愉悦，今天有什么开心的事吗？"
     }
 }

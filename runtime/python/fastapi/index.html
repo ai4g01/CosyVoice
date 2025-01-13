@@ -133,6 +133,7 @@
                 socket.send(JSON.stringify(finish_data));
                 console.log('已发送文本:', text);
             } else {
+                alert("WebSocket 未连接或文本内容为空")
                 console.error('WebSocket 未连接或文本为空');
             }
         });
