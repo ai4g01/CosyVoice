@@ -98,7 +98,6 @@ class SpeechSynthesizer:
         self._intput_text_lock = threading.Lock()
         self._finished = False
 
-
     async def start(self, data: dict):
         self._finished = False
         self._thread = threading.Thread(target=self._run, args=(data,))
@@ -116,36 +115,35 @@ class SpeechSynthesizer:
 
     def _run(self, data: dict):
         logger.info(f"{self._uuid} started, {data}")
-        asyncio.run(self.websocket.send_json({"event": "started", "uuid": self._uuid})) #  
-
+        asyncio.run(self.websocket.send_json({"event": "started", "uuid": self._uuid}))  #
+        
         remaining_text = ""
-        sequence_min_len = 6
-        while not self._finished:
+        def get_input_text():
             with self._intput_text_lock:
                 text = remaining_text + self._input_text
                 self._input_text = ""
+                return text
 
+        while not self._finished:
+            text = get_input_text()
             end_index = self.find_last_punctuations(text)  ##找到最后一个标点符号
-            if end_index > sequence_min_len:
+            if end_index > 5:
                 tts_text = text[:end_index]
                 remaining_text = text[end_index:]
-                data['text'] = tts_text
+                data["text"] = tts_text
                 self._synthesis(data)
             else:
                 remaining_text = text
 
             time.sleep(0.01)
 
-        with self._intput_text_lock:
-            text = remaining_text + self._input_text
-            self._input_text = ""
-        data['text'] = text
-        self._synthesis(data)
+        data["text"] = get_input_text()  ## 剩余的文本
+        if len(data["text"]) > 0:
+            self._synthesis(data)
 
         asyncio.run(self.websocket.send_json({"event": "finished", "uuid": self._uuid}))
         self._thread = None
         logger.info(f"{self._uuid} finished")
-
 
     def find_last_punctuations(self, s):
         punctuation = r'.,?!"【】。，；：？！～…'                      
@@ -153,10 +151,10 @@ class SpeechSynthesizer:
         if match:
             return len(s) - match.start() - 1
         else:
-            return len(s) - 1
+            return - 1
 
     def _synthesis(self, data: dict):
-        #logger.info(f"{self._uuid} synthesis, {data}")
+        # logger.info(f"{self._uuid} synthesis, {data}")
         set_all_random_seed(42)
         if data["method"] == "sft":
             model_output = cosyvoice.inference_sft(tts_text=data['text'], spk_id=data["spk_id"], stream=True)
